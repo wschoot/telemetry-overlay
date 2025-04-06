@@ -1,0 +1,3 @@
+moviepy
+gpxpy
+matplotlib
