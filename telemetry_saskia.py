@@ -1,92 +1,145 @@
-from os import listdir
-from os.path import isfile, join
 import matplotlib.pyplot as plt
 import gpxpy
 import datetime
 import moviepy as mp
 from PIL import Image, ImageFont, ImageDraw 
+import os
 
 # Set constants
-MOVIE_FILE = '20250327_131825.mp4'
-# MOVIE_FILE = '20250327_131046.mp4'
-GPX_FILENAME = 'activity_18651877796.gpx'
 EXTRA_TIME_AROUND_MOVIE = 10 # seconds
 ROUTE_IMAGE_FILE = 'gpx_plot.png'
 IMAGE_FILE_RESIZED = 'new_image_resized.png'
+RESULTING_MOVIE = 'end_result.mp4'
 
-# Get the movie file: get info and rotate it
-movie_info = mp.VideoFileClip(MOVIE_FILE)
-creation_time = movie_info.reader.infos['metadata']['creation_time']
-duration = movie_info.duration
-movie_info_rotated = movie_info.resized(movie_info.size[::-1])
+# get movies
+MOVIE_FILES = []
+for file in sorted(os.listdir(".")):
+    if file.endswith(".mp4") and file != RESULTING_MOVIE:
+        MOVIE_FILES.append(file)
+    if file.endswith(".gpx"):
+        GPX_FILENAME = file
 
-# determine the time period of the movie; Add 10 seconds before+after
-begin_time = datetime.datetime.fromisoformat(creation_time)  - datetime.timedelta(seconds=EXTRA_TIME_AROUND_MOVIE)
-end_time = begin_time + datetime.timedelta(seconds=duration) + datetime.timedelta(seconds=2*EXTRA_TIME_AROUND_MOVIE)
+if len(MOVIE_FILES) == 0:
+    exit("No movies found")
+if GPX_FILENAME is None:
+    exit("No GPX found")
 
-# Get GPX file: get info and plot it
-fig = plt.figure(facecolor = '1')
-plt.axis('off') 
+print(MOVIE_FILES)
 
+# Get GPX info
 gpx_file = open(GPX_FILENAME, 'r')
 gpx = gpxpy.parse(gpx_file)
 
-lat = []
-lon = []
+gpx_info = []
 for track in gpx.tracks:
     for segment in track.segments:
         for point in segment.points:
-            lat.append(point.latitude)
-            lon.append(point.longitude)
-            if point.time >= begin_time and point.time <= end_time:
-                line_color = 'red'
-            else:
-                line_color = 'green'
-            plt.plot(lon[-2:], lat[-2:], color=line_color, lw=8, alpha = 0.5)
-
-del lat
-del lon
-
+            gpx_info.append({
+                "lat": point.latitude,
+                "lon": point.longitude,
+                "time": point.time
+            })
+            
 distance = gpx.length_2d() / 1000
 gpx_file.close()
 
-# Add km's to the route
-# plt.figtext(.5, .9, s=str(round(distance,2)) + ' km', fontsize=30, ha='center')
+# Get movie info
+all_times = {}
+for MOVIE_FILE in MOVIE_FILES:
+    # Get the movie file: get info and rotate it
+    movie_info = mp.VideoFileClip(MOVIE_FILE)
+    creation_time = movie_info.reader.infos['metadata']['creation_time']
+    duration = movie_info.duration
+    movie_info_rotated = movie_info.resized(movie_info.size[::-1])
 
-# Save the route
-plt.savefig(ROUTE_IMAGE_FILE, dpi=300,transparent=True)
-# plt.show()
+    # determine the time period of the movie; Add 10 seconds before+after
+    begin_time = datetime.datetime.fromisoformat(creation_time)  - datetime.timedelta(seconds=EXTRA_TIME_AROUND_MOVIE)
+    end_time = begin_time + datetime.timedelta(seconds=duration) + datetime.timedelta(seconds=2*EXTRA_TIME_AROUND_MOVIE)
+    all_times[MOVIE_FILE] = {
+        "begin_time": begin_time,
+        "end_time": end_time,
+        "movie": movie_info_rotated,
+        "duration": duration,
+    }
+del movie_info, creation_time, duration, movie_info_rotated, begin_time, end_time
 
-# Create a transparant image of correct size
-width, height = movie_info.size[1], movie_info.size[0]
-transparant_image = Image.new('RGB', (width, height), color='white')
-transparant_image.putalpha(0)
+videos = []
+for movie_iter in all_times.values():
+    movie_info = movie_iter['movie']
+    # Plot GPX
+    fig = plt.figure(facecolor = '1')
+    plt.axis('off') 
 
-# Locally resize route image
-base_width = int(width*2/3) # Change this if you want route smaller than whole screen
-route = Image.open(ROUTE_IMAGE_FILE)
-wpercent = (base_width / float(route.size[0]))
-hsize = int((float(route.size[1]) * float(wpercent)))
-route = route.resize((base_width, hsize), Image.Resampling.LANCZOS)
+    for i in range(len(gpx_info)):
+        gpx_time = gpx_info[i]['time']
+        if i == 0:
+            continue
+        line_color = 'green'
+        for iter in all_times.values():
+            iter_begin = iter['begin_time']
+            iter_end = iter['end_time']
+            if gpx_time >= iter_begin and gpx_time <= iter_end:
+                line_color = 'red'
+        if gpx_time >= movie_iter['begin_time'] and gpx_time <= movie_iter['end_time']:
+                # current part
+                line_color = 'yellow'
+        plt.plot(
+            [gpx_info[i-1]['lon'],gpx_info[i]['lon']], # longitude
+            [gpx_info[i-1]['lat'],gpx_info[i]['lat']], # latitude
+            color=line_color, # line color
+            lw=8, # line width
+            alpha = 0.5 # transparancy level
+        )
 
-# Paste resized route image into transparant image
-new_image = transparant_image.copy()
-new_image.save(IMAGE_FILE_RESIZED)
-new_image = Image.open(IMAGE_FILE_RESIZED) # Need save+open for Draw to work?
-new_image.paste(route, (0,height - hsize))
-font = ImageFont.load_default(size=80)
-draw = ImageDraw.Draw(new_image).text(
-    (2/3 * width,height - hsize/2), # coordinates
-    "km's: " + str(round(distance,2)), # text
-    font=font
-)
-new_image.save(IMAGE_FILE_RESIZED)
+    # Save the route
+    plt.savefig(ROUTE_IMAGE_FILE, dpi=300,transparent=True)
+    # plt.show()
 
-img_clip = mp.ImageClip(IMAGE_FILE_RESIZED).with_duration(duration)
+    # Create a transparant image of correct size
+    width, height = movie_info.size[0], movie_info.size[1]
+    transparant_image = Image.new('RGB', (width, height), color='white')
+    transparant_image.putalpha(0)
+
+    # Locally resize route image
+    base_width = int(width*2/3) # Change this if you want route smaller than whole screen
+    route = Image.open(ROUTE_IMAGE_FILE)
+    wpercent = (base_width / float(route.size[0]))
+    hsize = int((float(route.size[1]) * float(wpercent)))
+    route = route.resize((base_width, hsize), Image.Resampling.LANCZOS)
+
+    # Paste resized route image into transparant image
+    new_image = transparant_image.copy()
+    new_image.save(IMAGE_FILE_RESIZED)
+    
+    new_image = Image.open(IMAGE_FILE_RESIZED) # Need save+open for Draw to work?
+    new_image.paste(route, (0,height - hsize))
+
+    font = ImageFont.load_default(size=80)
+    draw = ImageDraw.Draw(new_image).text(
+        (2/3 * width,height - hsize/2), # coordinates
+        "km's: " + str(round(distance,2)), # text
+        font=font
+    )
+    new_image.save(IMAGE_FILE_RESIZED)
+
+    img_clip = mp.ImageClip(IMAGE_FILE_RESIZED).with_duration(movie_iter['duration'])
 
 
-# Overlay the text clip on the first video clip
-video = mp.CompositeVideoClip([movie_info_rotated, img_clip])
+    # Overlay the text clip on the first video clip
+    video = mp.CompositeVideoClip([movie_iter['movie'], img_clip])
+    videos.append(video)
+    
 
 # Write the result to a file (many options available!)
-video.write_videofile("result.mp4", fps=2)
+# video.preview(fps=5, audio=False)
+final_clip = mp.concatenate_videoclips(videos, method='chain')
+final_clip.write_videofile(RESULTING_MOVIE, fps=2, threads=24, preset='ultrafast')
+
+# clips = [
+#     videos[0].with_end(2),
+#     videos[1].with_start(1).with_effects([fadein.CrossFadeIn(1)]),
+#     videos[0].with_start(1).with_effects([fadein.CrossFadeIn(1)]),
+# ]
+# final_clip = mp.CompositeVideoClip(clips)
+# final_clip.preview(fps=5, audio=False)
+# final_clip.write_videofile("result.mp4", fps=2, threads = 24, preset="ultrafast")
