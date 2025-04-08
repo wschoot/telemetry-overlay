@@ -24,8 +24,6 @@ if len(MOVIE_FILES) == 0:
 if GPX_FILENAME is None:
     exit("No GPX found")
 
-print(MOVIE_FILES)
-
 # Get GPX info
 gpx_file = open(GPX_FILENAME, 'r')
 gpx = gpxpy.parse(gpx_file)
@@ -93,7 +91,6 @@ for movie_iter in all_times.values():
 
     # Save the route
     plt.savefig(ROUTE_IMAGE_FILE, dpi=300,transparent=True)
-    # plt.show()
 
     # Create a transparant image of correct size
     width, height = movie_info.size[0], movie_info.size[1]
@@ -130,16 +127,11 @@ for movie_iter in all_times.values():
     videos.append(video)
     
 
-# Write the result to a file (many options available!)
+# Write the result to a file
 # video.preview(fps=5, audio=False)
-final_clip = mp.concatenate_videoclips(videos, method='chain')
-final_clip.write_videofile(RESULTING_MOVIE, fps=2, threads=24, preset='ultrafast')
+clips = [videos[0].with_end(4)]
+for vid in videos[1:]:
+    clips.append(vid.with_start(1).with_effects([mp.vfx.CrossFadeIn(1)]))
+final_clip = mp.CompositeVideoClip(clips)
 
-# clips = [
-#     videos[0].with_end(2),
-#     videos[1].with_start(1).with_effects([fadein.CrossFadeIn(1)]),
-#     videos[0].with_start(1).with_effects([fadein.CrossFadeIn(1)]),
-# ]
-# final_clip = mp.CompositeVideoClip(clips)
-# final_clip.preview(fps=5, audio=False)
-# final_clip.write_videofile("result.mp4", fps=2, threads = 24, preset="ultrafast")
+final_clip.write_videofile(RESULTING_MOVIE, fps=4, threads=24, preset='ultrafast')
